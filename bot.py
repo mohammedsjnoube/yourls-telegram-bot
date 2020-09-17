@@ -7,7 +7,9 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 
 class YourlsBot:
-    def __init__(self, yourls_url, yourls_user, yourls_password, telegram_token, secret):
+    def __init__(
+        self, yourls_url, yourls_user, yourls_password, telegram_token, secret
+    ):
         self.secret = secret
         self.yourls = pyourls3.Yourls(
             yourls_url, user=yourls_user, passwd=yourls_password
@@ -23,6 +25,15 @@ class YourlsBot:
         self.dispatcher.add_handler(start_handler)
 
         self.updater.start_polling()
+
+    def jsonToMessage(self, msg_json):
+        """ Converts a Dict/JSON to a Message """
+        if type(msg_json) == str:
+            return msg_json
+        reply_message = ""
+        for item in msg_json:
+            reply_message += f"{item}: {msg_json[item]}\n"
+        return reply_message
 
     def start(self, update, context):
         """
@@ -77,9 +88,17 @@ class YourlsBot:
         if msg.lower().split(" ")[0] == "stats":
             if len(msg.lower().split(" ")) > 1:
                 stats = self.yourls.url_stats(msg.lower().split(" ")[1])
+                reply_message = self.jsonToMessage(stats)
+
             else:
                 stats = self.yourls.stats()
-            context.bot.send_message(chat_id=update.effective_chat.id, text=stats)
+                reply_message = self.jsonToMessage(stats)
+
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=reply_message,
+                disable_web_page_preview=True,
+            )
             context.chat_data["mode"] = ""
         # This segments handles the creation of the shortlink
         elif msg.lower() == "shortlink" and not context.chat_data["mode"] == "url_dest":
@@ -172,4 +191,6 @@ if __name__ == "__main__":
 
     TELEGRAM_TOKEN = config["TELEGRAM"]["token"]
 
-    yourlsBot = YourlsBot(YOURLS_URL,YOURLS_USER,YOURLS_PASSWORD,TELEGRAM_TOKEN, SECRET)
+    yourlsBot = YourlsBot(
+        YOURLS_URL, YOURLS_USER, YOURLS_PASSWORD, TELEGRAM_TOKEN, SECRET
+    )
