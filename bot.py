@@ -169,11 +169,12 @@ class YourlsBot:
             context.chat_data["url_short"] = msg.lower()
             url_short = context.chat_data["url_short"]
             url_dest = context.chat_data["url_dest"]
-            context.chat_data["mode"] == "both_urls"
+            context.chat_data["mode"] = "both_urls"
             print(f"url_short: {url_short}, url_dest: {url_dest}, checking...")
             context.bot.send_message(
                 chat_id=update.effective_chat.id, text="... checking."
             )
+
             try:
                 self.yourls.url_stats(url_short)
                 context.bot.send_message(
