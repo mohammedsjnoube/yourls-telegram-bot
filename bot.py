@@ -22,7 +22,9 @@ class YourlsBot:
 
         # Adding the start handler to telegram
         start_handler = CommandHandler("start", self.start)
+        reset_handler = CommandHandler("reset", self.reset)
         self.dispatcher.add_handler(start_handler)
+        self.dispatcher.add_handler(reset_handler)
 
         self.updater.start_polling()
 
@@ -43,6 +45,10 @@ class YourlsBot:
             chat_id=update.effective_chat.id, text="Type info for more information"
         )
 
+    def reset(self, update, context):
+        context.chat_data["mode"] = ""
+        context.bot.send_message(chat_id=update.effective_chat.id, text="mode reset.")
+
     def echo(self, update, context):
         """
         This function handles the hole communication
@@ -60,6 +66,10 @@ class YourlsBot:
     1. type "shortlink"
     2. enter your destination URL
     3. enter your shortlink (without the domain)
+    OR:
+    type "shortlink <destination>"
+    OR:
+    type "shortlink <short> <destination>"
     """
             context.bot.send_message(
                 chat_id=update.effective_chat.id,
@@ -101,6 +111,38 @@ class YourlsBot:
             )
             context.chat_data["mode"] = ""
         # This segments handles the creation of the shortlink
+        elif msg.lower().split()[0] == "shortlink" and len(msg.lower().split()) > 1:
+            msg_splitted = msg.lower().split()
+            if len(msg_splitted) == 2:
+                context.chat_data["url_dest"] = msg_splitted[1]
+                valid = validators.url(context.chat_data["url_dest"])
+                # print("URL valid:", valid)
+                if not valid == True:
+                    context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="URL is not valid. Try again.",
+                    )
+                    return True
+                context.chat_data["mode"] = "just_dest"
+                context.bot.send_message(
+                    chat_id=update.effective_chat.id, text=self.createShortLink(context)
+                )
+            elif len(msg_splitted) == 3:
+                context.chat_data["url_short"] = msg_splitted[1]
+                context.chat_data["url_dest"] = msg_splitted[2]
+                valid = validators.url(context.chat_data["url_dest"])
+                # print("URL valid:", valid)
+                if not valid == True:
+                    context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="URL is not valid. Try again.",
+                    )
+                    return True
+                context.chat_data["mode"] = "both_urls"
+                context.bot.send_message(
+                    chat_id=update.effective_chat.id, text=self.createShortLink(context)
+                )
+
         elif msg.lower() == "shortlink" and not context.chat_data["mode"] == "url_dest":
             context.chat_data["mode"] = "url_dest"
             print(f"set mode to: {context.chat_data['mode']}")
@@ -127,6 +169,7 @@ class YourlsBot:
             context.chat_data["url_short"] = msg.lower()
             url_short = context.chat_data["url_short"]
             url_dest = context.chat_data["url_dest"]
+            context.chat_data["mode"] == "both_urls"
             print(f"url_short: {url_short}, url_dest: {url_dest}, checking...")
             context.bot.send_message(
                 chat_id=update.effective_chat.id, text="... checking."
@@ -139,40 +182,39 @@ class YourlsBot:
                 )
                 context.chat_data["mode"] = "url_short"
             except:
-                try:
-                    response = self.yourls.shorten(
-                        context.chat_data["url_dest"], context.chat_data["url_short"]
-                    )
-                    context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text="Shortlink created: {}".format(
-                            response["shorturl"], disable_web_page_preview=True
-                        ),
-                    )
-                except pyourls3.exceptions.Pyourls3URLAlreadyExistsError:
-                    context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text="Error. The Destination URL already exists!",
-                    )
-                    print("Pyourls3URLAlreadyExistsError", response)
-                except pyourls3.exceptions.Pyourls3APIError:
-                    context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text="Unknown Error. Maybe the shortlink already exists.",
-                    )
-                    print("Pyourls3APIError", response)
-                except:
-                    print("except. Don't know what's wrong.")
-                    context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text="except. Don't know what's wrong.",
-                    )
-                finally:
-                    context.chat_data["mode"] = ""
-                    context.chat_data["url_short"] = ""
-                    context.chat_data["url_dest"] = ""
+                context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=self.createShortLink(context),
+                )
 
         # context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+
+    def createShortLink(self, context):
+        try:
+            if context.chat_data["mode"] == "both_urls":
+                response = self.yourls.shorten(
+                    context.chat_data["url_dest"], context.chat_data["url_short"]
+                )
+            elif context.chat_data["mode"] == "just_dest":
+                response = self.yourls.shorten(context.chat_data["url_dest"])
+            return_msg = "Shortlink created: {}".format(
+                response["shorturl"], disable_web_page_preview=True
+            )
+        except pyourls3.exceptions.Pyourls3URLAlreadyExistsError:
+            return_msg = "Error. The Destination URL already exists!"
+            # print("Pyourls3URLAlreadyExistsError", response)
+        except pyourls3.exceptions.Pyourls3APIError:
+            return_msg = "Unknown Error. Maybe the shortlink already exists."
+            # print("Pyourls3APIError", response)
+        except:
+            return_msg = "except. Don't know what's wrong."
+            print("except. Don't know what's wrong.")
+        finally:
+            context.chat_data["mode"] = ""
+            context.chat_data["url_short"] = ""
+            context.chat_data["url_dest"] = ""
+
+        return return_msg
 
 
 if __name__ == "__main__":
