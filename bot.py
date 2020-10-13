@@ -1,8 +1,8 @@
 import validators
-import configparser
 import logging
 
-import pyourls3
+from pyourls3 import exceptions
+from yourls import Yourls
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 
@@ -11,12 +11,33 @@ class YourlsBot:
         self, yourls_url, yourls_user, yourls_password, telegram_token, secret
     ):
         self.secret = secret
-        self.yourls = pyourls3.Yourls(
+        self.yourls = Yourls(
             yourls_url, user=yourls_user, passwd=yourls_password
         )
         self.updater = Updater(token=telegram_token, use_context=True)
         self.dispatcher = self.updater.dispatcher
-        # Adding the echo handler to telegram
+
+        # info-handler
+        info_handler = MessageHandler(Filters.text('info'), self.info)
+        self.dispatcher.add_handler(info_handler)
+
+        # delete-handler
+        delete_handler = MessageHandler(Filters.regex(r'delete'), self.delete)
+        self.dispatcher.add_handler(delete_handler)
+
+        # secret-handler
+        secret_handler = MessageHandler(Filters.text(self.secret), self.check_secret)
+        self.dispatcher.add_handler(secret_handler)
+
+        # stats-handler
+        stats_handler = MessageHandler(Filters.regex(r'stats'), self.stats)
+        self.dispatcher.add_handler(stats_handler)
+
+        # shortlink-handler
+        shortlink_handler = MessageHandler(Filters.regex(r'shortlink'), self.shortlink)
+        self.dispatcher.add_handler(shortlink_handler)
+
+        # echo-handler
         echo_handler = MessageHandler(Filters.text & (~Filters.command), self.echo)
         self.dispatcher.add_handler(echo_handler)
 
@@ -45,73 +66,71 @@ class YourlsBot:
             chat_id=update.effective_chat.id, text="Type info for more information"
         )
 
+    def info(self, update, context):
+        """
+        Funktion, that sends a starting message to a new user
+        """
+        info_message = """**Bot for yourls**
+            First enter the secret.
+            "stats" get's you overall statistics, "stats shortlink" get's you statistics for a specific shortlink.
+            "delete <shortlink>" deletes a shortlink.
+            To create a shortlink, proceed as follows:
+            1. type "shortlink"
+            2. enter your destination URL
+            3. enter your shortlink (without the domain)
+            OR:
+            type "shortlink <destination>"
+            OR:
+            type "shortlink <short> <destination>"
+            """
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=info_message,
+            parse_mode="Markdown",
+        )
+
     def reset(self, update, context):
         context.chat_data["mode"] = ""
         context.bot.send_message(chat_id=update.effective_chat.id, text="mode reset.")
 
-    def echo(self, update, context):
-        """
-        This function handles the hole communication
-        """
+    def delete(self, update, context):
+        # Needed: Check, if the shortlink exist.
         msg = update.message.text
-        logging.info(f"User: {update.message.chat.username}, Message: {msg}")
+        print('delete: ', msg)
+        if len(msg.lower().split(" ")) > 1:
+            try:
+                response = self.yourls.delete(msg.lower().split(" ")[1])
+                context.bot.send_message(chat_id=update.effective_chat.id, text="Deleted.")
+            except exceptions.Pyourls3HTTPError:
+                context.bot.send_message(chat_id=update.effective_chat.id, text="Not found.")
 
-        # "info" displays a short tutorial how to create a shortlink
-        if msg.lower() == "info":
-            info_message = """**Bot for yourls**
-    First enter the secret.
-    "stats" get's you overall statistics, "stats shortlink" get's you statistics for a specific shortlink.
-
-    To create a shortlink, proceed as follows:
-    1. type "shortlink"
-    2. enter your destination URL
-    3. enter your shortlink (without the domain)
-    OR:
-    type "shortlink <destination>"
-    OR:
-    type "shortlink <short> <destination>"
-    """
-            context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=info_message,
-                parse_mode="Markdown",
-            )
-            return True
-
-        # This authenticates the user
-        if msg == self.secret:
-            context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="Secret is correct. Authenticated.",
-            )
-            context.chat_data["auth"] = True
-        # If the user is not authenticated notify him and stop
-        elif "auth" not in context.chat_data:
-            context.bot.send_message(chat_id=update.effective_chat.id, text="Secret?")
-            return True
-
-        if "mode" not in context.chat_data:
-            context.chat_data["mode"] = ""
-
+    def stats(self, update, context):
         # With "stats" the user gets the overall stats from yourls
         # With "stats shortlink" the user gets the stats for the specific shortlink
-        if msg.lower().split(" ")[0] == "stats":
-            if len(msg.lower().split(" ")) > 1:
-                stats = self.yourls.url_stats(msg.lower().split(" ")[1])
-                reply_message = self.jsonToMessage(stats)
+        msg = update.message.text
+        print('stats: ', msg)
+        if len(msg.lower().split(" ")) > 1:
+            stats = self.yourls.url_stats(msg.lower().split(" ")[1])
+            reply_message = self.jsonToMessage(stats)
 
-            else:
-                stats = self.yourls.stats()
-                reply_message = self.jsonToMessage(stats)
+        else:
+            stats = self.yourls.stats()
+            reply_message = self.jsonToMessage(stats)
 
-            context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=reply_message,
-                disable_web_page_preview=True,
-            )
-            context.chat_data["mode"] = ""
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=reply_message,
+            disable_web_page_preview=True,
+        )
+        context.chat_data["mode"] = ""
+
+    def shortlink(self, update, context):
         # This segments handles the creation of the shortlink
-        elif msg.lower().split()[0] == "shortlink" and len(msg.lower().split()) > 1:
+        msg = update.message.text
+        print('shortlink: ', msg)
+        msg_splitted = msg.lower().split()
+
+        if len(msg.lower().split()) > 1:
             msg_splitted = msg.lower().split()
             if len(msg_splitted) == 2:
                 context.chat_data["url_dest"] = msg_splitted[1]
@@ -143,13 +162,37 @@ class YourlsBot:
                     chat_id=update.effective_chat.id, text=self.createShortLink(context)
                 )
 
-        elif msg.lower() == "shortlink" and not context.chat_data["mode"] == "url_dest":
+        else:
             context.chat_data["mode"] = "url_dest"
             print(f"set mode to: {context.chat_data['mode']}")
             context.bot.send_message(
                 chat_id=update.effective_chat.id, text="Destination URL"
             )
-        elif context.chat_data["mode"] == "url_dest":
+
+    def check_secret(self, update, context):
+        if update.message.text == self.secret:
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Secret is correct. Authenticated.",
+            )
+            context.chat_data["auth"] = True
+
+    def echo(self, update, context):
+        """
+        This function handles the hole communication
+        """
+        msg = update.message.text
+        logging.info(f"User: {update.message.chat.username}, Message: {msg}")
+        print('echo: ', msg)
+
+        # If the user is not authenticated notify him and stop
+        if "auth" not in context.chat_data:
+            context.bot.send_message(chat_id=update.effective_chat.id, text="Secret?")
+            return True
+
+        if "mode" not in context.chat_data:
+            context.chat_data["mode"] = ""
+        if context.chat_data["mode"] == "url_dest":
             context.chat_data["url_dest"] = msg.lower()
 
             valid = validators.url(context.chat_data["url_dest"])
