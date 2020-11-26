@@ -1,9 +1,10 @@
 import validators
 import logging
 
-from pyourls3 import exceptions
-from pyourls3 import Yourls
+from pyourls3 import exceptions, Yourls
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+
+import requests
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -11,22 +12,27 @@ logging.basicConfig(
     filename="bot.log",
 )
 
-
 class YourlsBot:
     def __init__(
-        self, yourls_url, yourls_user, yourls_password, telegram_token, secret
+            self, yourls_url, yourls_user, yourls_password, telegram_token, secret
     ):
         self.secret = secret
-        self.yourls = Yourls(yourls_url, user=yourls_user, passwd=yourls_password)
+        self.yourls = Yourls(
+            yourls_url, user=yourls_user, passwd=yourls_password
+        )
         self.updater = Updater(token=telegram_token, use_context=True)
         self.dispatcher = self.updater.dispatcher
 
         # info-handler
-        info_handler = MessageHandler(Filters.text("info"), self.info)
+        info_handler = MessageHandler(Filters.text('info'), self.info)
         self.dispatcher.add_handler(info_handler)
 
+        # update-handler
+        update_handler = MessageHandler(Filters.regex(r'update'), self.update)
+        self.dispatcher.add_handler(update_handler)
+
         # delete-handler
-        delete_handler = MessageHandler(Filters.regex(r"delete"), self.delete)
+        delete_handler = MessageHandler(Filters.regex(r'delete'), self.delete)
         self.dispatcher.add_handler(delete_handler)
 
         # secret-handler
@@ -34,11 +40,11 @@ class YourlsBot:
         self.dispatcher.add_handler(secret_handler)
 
         # stats-handler
-        stats_handler = MessageHandler(Filters.regex(r"stats"), self.stats)
+        stats_handler = MessageHandler(Filters.regex(r'stats'), self.stats)
         self.dispatcher.add_handler(stats_handler)
 
         # shortlink-handler
-        shortlink_handler = MessageHandler(Filters.regex(r"shortlink"), self.shortlink)
+        shortlink_handler = MessageHandler(Filters.regex(r'shortlink'), self.shortlink)
         self.dispatcher.add_handler(shortlink_handler)
 
         # echo-handler
@@ -75,7 +81,7 @@ class YourlsBot:
         Funktion, that sends a starting message to a new user
         """
 
-        info_message = """**Bot for yourls**
+        info_message = '''**Bot for yourls**
             First enter the secret.
             "stats" get's you overall statistics, "stats shortlink" get's you statistics for a specific shortlink.
             "delete <shortlink>" deletes a shortlink.
@@ -87,10 +93,8 @@ class YourlsBot:
             type "shortlink <destination>"
             OR:
             type "shortlink <short> <destination>"
-            """
-        logging.info(
-            f"User: {update.message.chat.username}, Message: {update.message.text}"
-        )
+            '''
+        logging.info(f"User: {update.message.chat.username}, Message: {update.message.text}")
 
         context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -113,13 +117,26 @@ class YourlsBot:
         if len(msg.lower().split(" ")) > 1:
             try:
                 response = self.yourls.delete(msg.lower().split(" ")[1])
-                context.bot.send_message(
-                    chat_id=update.effective_chat.id, text="Deleted."
-                )
+                context.bot.send_message(chat_id=update.effective_chat.id, text="Deleted.")
             except exceptions.Pyourls3HTTPError:
-                context.bot.send_message(
-                    chat_id=update.effective_chat.id, text="Not found."
-                )
+                context.bot.send_message(chat_id=update.effective_chat.id, text="Not found.")
+
+    def update(self, update, context):
+        # Needed: Check, if the shortlink exist.
+        if "auth" not in context.chat_data:
+            context.bot.send_message(chat_id=update.effective_chat.id, text="Secret?")
+            return True
+        msg = update.message.text
+
+        logging.info(f"User: {update.message.chat.username}, Message: {msg}")
+        if len(msg.lower().split(" ")) > 2:
+            try:
+                response = self.yourls.update(msg.lower().split(" ")[1],msg.lower().split(" ")[1])
+                context.bot.send_message(chat_id=update.effective_chat.id, text="Updated.")
+            except exceptions.Pyourls3HTTPError:
+                context.bot.send_message(chat_id=update.effective_chat.id, text="Not found.")
+        else:
+            context.bot.send_message(chat_id=update.effective_chat.id, text="You need to specify two arguments: update <shortlink> <destination>")
 
     def stats(self, update, context):
         # With "stats" the user gets the overall stats from yourls
@@ -141,12 +158,14 @@ class YourlsBot:
             stats = self.yourls.stats()
             reply_message = self.jsonToMessage(stats)
 
+
         context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=reply_message,
             disable_web_page_preview=True,
         )
         context.chat_data["mode"] = ""
+
 
     def shortlink(self, update, context):
         # This segments handles the creation of the shortlink
